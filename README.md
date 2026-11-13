@@ -1,30 +1,38 @@
 # FGO-JP-AutoRoute
 
-日版 Fate/Grand Order 自動推圖工具，目標環境為 Windows 11 + MuMu Player 12。
+**v0.4.0 · Windows 11 + MuMu 12 + 日版 FGO**
 
-## Windows EXE（使用者不需要安裝 Python）
+這次更新把操作方式改成 **Windows 原生桌面視窗**，並簡化推圖設定。
 
-本 Repository 已設定 GitHub Actions Windows x64 編譯流程。Python 只會在 GitHub 的雲端編譯機器上使用；下載 EXE 的 Windows 使用者不需要安裝 Python 或 pip。
+## v0.4.0 更新
 
-### 首次上傳原始碼
+- 雙擊 EXE 直接開啟獨立視窗，不再自動開 Chrome。
+- MuMu 即時畫面連線後每 2 秒自動更新。
+- 推圖設定提供簡易通關次數欄位。
+- JSON 與戰鬥規則等進階設定預設收合。
+- 一般使用者不需要安裝 Python。
 
-請將專案原始碼 ZIP 上傳到 Repository 根目錄，檔名可使用：
+## 下載 EXE
 
-`FGO-JP-AutoRoute-v0.3.0-source.zip`
+1. 開啟本 Repository 的 **Actions**。
+2. 選擇最新的 **Build Windows Desktop EXE**。
+3. 等待執行結果顯示成功。
+4. 在 Artifacts 下載 `FGO-JP-AutoRoute-Windows-x64`。
+5. 解壓縮並執行 `FGO-JP-AutoRoute.exe`。
 
-或 `FGO-JP-AutoRoute-v0.3.0-source(1).zip`。
+Python 只用於 GitHub 雲端編譯。Windows 原生視窗使用 WebView2；Windows 11 通常已內建 WebView2 Runtime。
 
-上傳完成並 Commit 到 `main` 後，`.github/workflows/build-exe.yml` 會自動解壓縮、安裝建置依賴、執行測試並打包單檔 `FGO-JP-AutoRoute.exe`。
+## 第一次使用
 
-### 下載編譯結果
+1. 開啟 MuMu 12 和日版 FGO。
+2. 執行 EXE，按右上角「連接 MuMu」。
+3. 確認即時畫面開始自動更新。
+4. 到「推圖設定」載入倫敦示範路線。
+5. 到「進階設定 → 畫面模板」依清單擷取必要模板。
+6. 回到任務總覽，先勾選「安全預檢」並按開始。
 
-1. 開啟 GitHub Repository 的 **Actions**。
-2. 選擇 **Build Windows EXE** 最新一次成功的執行紀錄。
-3. 在頁面下方 **Artifacts** 下載 `FGO-JP-AutoRoute-Windows-x64`。
-4. 解壓縮後執行 `FGO-JP-AutoRoute.exe`。
+## 目前功能範圍
 
-之後更新原始碼 ZIP 並推送到 `main)，會再次自動編譯。推送 `v*` 標籤則會建立 GitHub Release。
+內建範例為第一部第四特異點「倫敦」第六節。其他章節、特殊關卡與不同隊伍仍需自行建立並校準路線模板；尚不能保證所有主線都能自動推進。首次實際測試請全程監看。
 
-## 注意
-
-這是持續開發中的自動化輔助工具。使用者仍需在自己的日版 FGO / MuMu 12 畫面擷取模板並校準路線。尚未在所有章節與特殊戰鬥實機驗證，不保證能自動完成所有主線。首次測試請全程監看。自動化可能涉及遊戲服務條款及帳號風險，請先自行確認相關規範。
+自動化可能涉及遊戲服務條款及帳號風險，請先自行確認相關規範。
