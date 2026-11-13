@@ -1,11 +1,10 @@
-name: Build Windows Desktop EXE
+name: Build Windows EXE
 on:
   push:
     branches: [main, master]
+    tags: ['v*']
     paths:
-      - 'updates/v0.4.0-patch.zip.b64'
-      - '.github/workflows/build-exe.yml'
-      - 'README.md'
+      - 'FGO-JP-AutoRoute-v0.3.0-source*.zip'
   workflow_dispatch:
 permissions:
   contents: write
@@ -18,19 +17,16 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Extract source and apply v0.4.0 update
+      - name: Extract uploaded source archive
         shell: pwsh
         run: |
-          $archive = Get-Item "FGO-JP-AutoRoute-v0.3.0-source.zip"
+          $archive = Get-ChildItem -File -Filter "FGO-JP-AutoRoute-v0.3.0-source*.zip" | Select-Object -First 1
+          if ($null -eq $archive) {
+            throw "請先將 FGO-JP-AutoRoute-v0.3.0-source.zip 上傳到 Repository 根目錄。"
+          }
           Expand-Archive -Path $archive.FullName -DestinationPath source -Force
-          $encoded = (Get-Content "updates/v0.4.0-patch.zip.b64" -Raw).Trim()
-          $patchBytes = [Convert]::FromBase64String($encoded)
-          [IO.File]::WriteAllBytes("$PWD/updates/v0.4.0-patch.zip", $patchBytes)
-          Expand-Archive -Path "updates/v0.4.0-patch.zip" -DestinationPath "updates/patch" -Force
-          git apply --check --directory=source/FGO-JP-AutoRoute "updates/patch/v0.4.0.patch"
-          git apply --directory=source/FGO-JP-AutoRoute "updates/patch/v0.4.0.patch"
           if (!(Test-Path "source/FGO-JP-AutoRoute/app.py")) {
-            throw "更新後原始碼結構不正確。"
+            throw "ZIP 結構不正確：找不到 source/FGO-JP-AutoRoute/app.py"
           }
       - name: Install build dependencies
         working-directory: source/FGO-JP-AutoRoute
@@ -40,7 +36,7 @@ jobs:
       - name: Run tests
         working-directory: source/FGO-JP-AutoRoute
         run: python -m pytest -q
-      - name: Build standalone native Windows x64 EXE
+      - name: Build standalone Windows x64 EXE
         working-directory: source/FGO-JP-AutoRoute
         shell: pwsh
         run: |
@@ -55,30 +51,29 @@ jobs:
             --collect-all click `
             --collect-all itsdangerous `
             --collect-all blinker `
-            --collect-all webview `
-            --collect-all clr_loader `
-            --collect-all pythonnet `
-            --collect-all proxy_tools `
-            --collect-all bottle `
-            --hidden-import webview.platforms.edgechromium `
             app.py
-      - name: Package EXE and updated source
+      - name: Create download packages
         working-directory: source/FGO-JP-AutoRoute
         shell: pwsh
         run: |
           Copy-Item README.md dist/README.md
-          Compress-Archive -Path dist/FGO-JP-AutoRoute.exe,dist/README.md -DestinationPath dist/FGO-JP-AutoRoute-Windows-x64.zip -Force
-          $staging = Join-Path $env:RUNNER_TEMP "FGO-JP-AutoRoute-source"
-          New-Item -ItemType Directory -Path $staging -Force | Out-Null
-          $items = @("app.py","fgoauto","web","tests",".github","config","templates","requirements.txt","README.md","LICENSE",".gitignore","install.bat","start.bat","update.bat","build_exe.bat")
-          foreach ($item in $items) { Copy-Item -Path $item -Destination $staging -Recurse -Force }
-          $sourceItems = Get-ChildItem -Path $staging -Force | Select-Object -ExpandProperty FullName
-          Compress-Archive -Path $sourceItems -DestinationPath dist/FGO-JP-AutoRoute-Source.zip -Force
+          $archive = Get-ChildItem ../../ -File -Filter "FGO-JP-AutoRoute-v0.3.0-source*.zip" | Select-Object -First 1
+          Copy-Item $archive.FullName dist/FGO-JP-AutoRoute-Source.zip
+          Compress-Archive -Path dist/FGO-JP-AutoRoute.exe,dist/README.md `
+            -DestinationPath dist/FGO-JP-AutoRoute-Windows-x64.zip -Force
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: FGO-JP-AutoRoute-Windows-x64
           path: |
+            source/FGO-JP-AutoRoute/dist/FGO-JP-AutoRoute.exe
+            source/FGO-JP-AutoRoute/dist/FGO-JP-AutoRoute-Windows-x64.zip
+            source/FGO-JP-AutoRoute/dist/FGO-JP-AutoRoute-Source.zip
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
             source/FGO-JP-AutoRoute/dist/FGO-JP-AutoRoute.exe
             source/FGO-JP-AutoRoute/dist/FGO-JP-AutoRoute-Windows-x64.zip
             source/FGO-JP-AutoRoute/dist/FGO-JP-AutoRoute-Source.zip
