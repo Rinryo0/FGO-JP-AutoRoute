@@ -2,10 +2,9 @@ name: Build Windows EXE
 on:
   push:
     branches: [main, master]
+    tags: ['v*']
     paths:
       - 'FGO-JP-AutoRoute-v0.3.0-source.zip'
-      - '.github/workflows/build-exe.yml'
-    tags: ['v*']
   workflow_dispatch:
 permissions:
   contents: write
