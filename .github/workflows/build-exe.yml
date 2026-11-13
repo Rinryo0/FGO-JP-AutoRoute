@@ -31,7 +31,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r desktop/requirements.txt "pyinstaller>=6.10,<7" pytest
-      - name: Restore legacy route engine and v0.5 template wizard
+      - name: Restore legacy ADB and route-engine compatibility
         shell: pwsh
         run: |
           Expand-Archive -Path FGO-JP-AutoRoute-v0.3.0-source.zip -DestinationPath .source -Force
@@ -64,7 +64,7 @@ jobs:
       - name: Build standalone Windows x64 EXE
         shell: pwsh
         run: |
-          pyinstaller --noconfirm --clean --onefile --windowed --name FGO-JP-AutoRoute --collect-all PIL --collect-all cv2 --collect-all numpy --collect-all fgoauto --hidden-import legacy_main --paths desktop --add-data "desktop/vendor/scrcpy;scrcpy" desktop/main.py
+          pyinstaller --noconfirm --clean --onefile --windowed --name FGO-JP-AutoRoute --collect-all PIL --collect-all cv2 --collect-all numpy --collect-all fgoauto --collect-all rapidocr --collect-all onnxruntime --hidden-import legacy_main --hidden-import rapidocr --paths desktop --add-data "desktop/vendor/scrcpy;scrcpy" desktop/main.py
       - name: Package downloads
         shell: pwsh
         run: |
