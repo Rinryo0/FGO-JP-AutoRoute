@@ -1,12 +1,18 @@
 name: Build Windows Desktop EXE
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, v0.6.0-dev]
     paths:
       - 'desktop/**'
       - '.github/workflows/build-exe.yml'
       - 'README.md'
       - '.gitignore'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/build-exe.yml'
+      - 'README.md'
   workflow_dispatch:
 permissions:
   contents: read
@@ -21,18 +27,19 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install build dependencies
+        shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r desktop/requirements.txt "pyinstaller>=6.10,<7"
-      - name: Restore native app source and automation engine
+          python -m pip install -r desktop/requirements.txt "pyinstaller>=6.10,<7" pytest
+      - name: Restore legacy route engine and v0.5 template wizard
         shell: pwsh
         run: |
           Expand-Archive -Path FGO-JP-AutoRoute-v0.3.0-source.zip -DestinationPath .source -Force
           Copy-Item .source/FGO-JP-AutoRoute/fgoauto desktop/fgoauto -Recurse -Force
-          Copy-Item .source/FGO-JP-AutoRoute/tests desktop/tests -Recurse -Force
+          Copy-Item .source/FGO-JP-AutoRoute/tests desktop/legacy_tests -Recurse -Force
           python -c "import base64,pathlib; pathlib.Path('desktop/main.py.xz').write_bytes(base64.b64decode(pathlib.Path('desktop/main.py.xz.b64').read_bytes()))"
-          python -c "import lzma,pathlib; pathlib.Path('desktop/main.py').write_bytes(lzma.decompress(pathlib.Path('desktop/main.py.xz').read_bytes()))"
-      - name: Download scrcpy for real-time MuMu mirroring
+          python -c "import lzma,pathlib; pathlib.Path('desktop/legacy_main.py').write_bytes(lzma.decompress(pathlib.Path('desktop/main.py.xz').read_bytes()))"
+      - name: Download and verify scrcpy
         shell: pwsh
         run: |
           $version = "v5.0.1"
@@ -48,17 +55,16 @@ jobs:
           New-Item -ItemType Directory -Force -Path desktop/vendor/scrcpy | Out-Null
           Copy-Item -Path (Join-Path $scrcpyExe.DirectoryName "*") -Destination desktop/vendor/scrcpy -Recurse -Force
           Remove-Item desktop/vendor/scrcpy-temp -Recurse -Force
-      - name: Check Python syntax and tests
+      - name: Compile source and run tests
         shell: pwsh
         run: |
           python -m compileall -q desktop
-          python -m pip install pytest
           $env:PYTHONPATH = "desktop"
-          python -m pytest -q desktop/tests
+          python -m pytest -q desktop/legacy_tests desktop/v060_tests
       - name: Build standalone Windows x64 EXE
         shell: pwsh
         run: |
-          pyinstaller --noconfirm --clean --onefile --windowed --name FGO-JP-AutoRoute --collect-all PIL --collect-all cv2 --collect-all numpy --add-data "desktop/vendor/scrcpy;scrcpy" --paths desktop desktop/main.py
+          pyinstaller --noconfirm --clean --onefile --windowed --name FGO-JP-AutoRoute --collect-all PIL --collect-all cv2 --collect-all numpy --collect-all fgoauto --hidden-import legacy_main --paths desktop --add-data "desktop/vendor/scrcpy;scrcpy" desktop/main.py
       - name: Package downloads
         shell: pwsh
         run: |
