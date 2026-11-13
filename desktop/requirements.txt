@@ -1,1 +1,1 @@
-Pillow>=10.3,<13
+Pillow>=10.3,<13\nopencv-python-headless>=4.8,<5\nnumpy>=1.26,<3\n
