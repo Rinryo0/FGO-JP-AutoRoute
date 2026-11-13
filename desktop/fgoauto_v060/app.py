@@ -196,7 +196,7 @@ class AutoRouteDesktopApp:
                                insertbackground="#ffffff", relief="flat",
                                font=("Consolas", 9), wrap="word", state="disabled")
         self.log_box.pack(fill="x", pady=(6, 0))
-        self.log("v0.6.0 開發版已啟動。只有已驗證路線會開放自動執行。")
+        self.log("v0.6.0 OCR 開發版已啟動。連接 MuMu 後會自動辨識畫面；自動點擊尚未開放。")
 
     def _build_routes(self):
         ttk.Label(self.route_tab, text="第一部章節目錄", font=("Segoe UI", 14, "bold")).pack(anchor="w")
@@ -242,7 +242,7 @@ class AutoRouteDesktopApp:
                   wraplength=900).pack(anchor="w", pady=(5, 12))
         card = ttk.LabelFrame(self.battle_tab, text="目前可執行策略", padding=12)
         card.pack(fill="x", pady=6)
-        ttk.Label(card, text="穩定優先：沿用已存在的倫敦路線戰鬥流程；不自動使用技能或寶具。",
+        ttk.Label(card, text="目前版本：自動辨識畫面；自動選關、點擊與戰鬥尚未開放。",
                   wraplength=900).pack(anchor="w")
         future = ttk.LabelFrame(self.battle_tab, text="後續策略模組", padding=12)
         future.pack(fill="x", pady=8)
