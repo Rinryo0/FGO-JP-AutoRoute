@@ -1,1 +1,12 @@
-__pycache__/\n*.py[cod]\n.pytest_cache/\n.venv/\nbuild/\ndist/\n*.spec\nlogs/\n# User-specific game screenshots/templates and local settings must stay local.\ndesktop/config/*.json\ndesktop/templates/*.png\ndesktop/vendor/\n
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+build/
+dist/
+*.spec
+logs/
+# User-specific game screenshots/templates and local settings must stay local.
+desktop/config/*.json
+desktop/templates/*.png
+desktop/vendor/
