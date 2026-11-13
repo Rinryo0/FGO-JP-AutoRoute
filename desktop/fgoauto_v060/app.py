@@ -18,45 +18,14 @@ from .config import AppConfig, load_config, save_config
 from .planner import estimate_affordable_runs, make_custom_route
 from .storage import StatsStore
 
-# Restored by the Windows build workflow from the retained v0.5 source bundle.
-from legacy_main import TemplateWizard, find_adb, required_template_names
+# ADB discovery is retained for MuMu compatibility. Screen recognition is template-free.
+from legacy_main import find_adb
 from fgoauto.engine import Automation
-from fgoauto.profiles import LONDON_GUIDE, LONDON_RULES, london_job
-from fgoauto.storage import TEMPLATES, read, safe_template_name, write
+from fgoauto.storage import read, write
+from .vision import FgoScreenDetector
 
 APP_NAME = "FGO-JP-AutoRoute"
 PREVIEW_INTERVAL_MS = 220
-
-
-def configure_london_profile(progress_target: int, max_runs: int, skip_story: bool) -> None:
-    job = london_job()
-    stage = job["stages"][0]
-    stage["progress_target"] = max(1, min(5, int(progress_target)))
-    stage["max_runs"] = max(1, min(30, int(max_runs)))
-    if not skip_story:
-        stage["required_rule_templates"] = [
-            name for name in stage["required_rule_templates"]
-            if name not in ("story_skip", "skip_confirm_yes")
-        ]
-    jobs = read("jobs")
-    existing = next((index for index, item in enumerate(jobs) if item.get("id") == LONDON_ROUTE_ID), None)
-    if existing is None:
-        jobs.append(job)
-    else:
-        jobs[existing] = job
-    write("jobs", jobs)
-
-    rules = read("rules")
-    for rule in LONDON_RULES:
-        updated = dict(rule)
-        if updated["template"] in ("story_skip", "skip_confirm_yes", "dialogue_next"):
-            updated["enabled"] = bool(skip_story)
-        index = next((i for i, item in enumerate(rules) if item.get("template") == updated["template"]), None)
-        if index is None:
-            rules.append(updated)
-        else:
-            rules[index] = updated
-    write("rules", rules)
 
 
 class AutoRouteDesktopApp:
@@ -75,6 +44,12 @@ class AutoRouteDesktopApp:
         self.adb_path = find_adb()
         self.device_var = tk.StringVar(value=self.config.adb_serial)
         self.status_var = tk.StringVar(value="尚未連線")
+        self.screen_state_var = tk.StringVar(value="等待 MuMu 連線")
+        self.screen_detail_var = tk.StringVar(value="連接後會自動辨識目前畫面，不需要設定模板。")
+        self.screen_detector = FgoScreenDetector()
+        self.vision_thread = None
+        self.vision_stop = threading.Event()
+        self.last_detection = None
         self.chapter_var = tk.StringVar(value=self.config.selected_chapter)
         self.max_runs_var = tk.StringVar(value=str(self.config.max_runs))
         self.progress_target_var = tk.StringVar(value=str(self.config.progress_target))
@@ -96,7 +71,6 @@ class AutoRouteDesktopApp:
         self.capture_thread = None
         self.capture_stop = threading.Event()
         self.scrcpy_process = None
-        self.wizard = None
         self.closing = False
         self.session_started_at = None
         self.session_runs_observed = 0
@@ -108,7 +82,6 @@ class AutoRouteDesktopApp:
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.root.bind("<F8>", lambda _event: self.stop_automation())
         self.root.after(500, self._refresh_status)
-        self.refresh_template_status()
         self.refresh_stats()
 
     def _configure_style(self):
@@ -201,21 +174,18 @@ class AutoRouteDesktopApp:
         ttk.Label(right, text="任務控制", style="Panel.TLabel",
                   font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(0, 10))
         ttk.Label(right, text="第一部章節", style="Panel.TLabel").pack(anchor="w")
-        ttk.Label(right, textvariable=self.route_status_var, style="Panel.TLabel",
-                  wraplength=280).pack(anchor="w", pady=(4, 12))
-        ttk.Button(right, text="設定畫面模板", command=self.open_template_wizard).pack(fill="x", pady=4)
-        ttk.Button(right, text="檢查目前設定", command=self.check_setup).pack(fill="x", pady=4)
-        ttk.Button(right, text="開始自動推關", style="Accent.TButton",
-                   command=self.start_automation).pack(fill="x", pady=(12, 5))
-        row = ttk.Frame(right, style="Panel.TFrame")
-        row.pack(fill="x")
-        ttk.Button(row, text="暫停", command=self.pause_automation).pack(side="left", expand=True, fill="x", padx=(0, 3))
-        ttk.Button(row, text="繼續", command=self.resume_automation).pack(side="left", expand=True, fill="x", padx=3)
-        ttk.Button(row, text="停止", style="Danger.TButton",
-                   command=self.stop_automation).pack(side="left", expand=True, fill="x", padx=(3, 0))
-        self.template_count_var = tk.StringVar(value="模板 0 / 0")
-        ttk.Label(right, textvariable=self.template_count_var, style="Panel.TLabel").pack(anchor="w", pady=(14, 2))
-        ttk.Label(right, text="緊急停止：F8。AP 恢復與未知畫面需人工處理。",
+        ttk.Label(right, text="自動畫面辨識", style="Panel.TLabel",
+                  font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(4, 5))
+        ttk.Label(right, textvariable=self.screen_state_var, style="Panel.TLabel",
+                  wraplength=280).pack(anchor="w")
+        ttk.Label(right, textvariable=self.screen_detail_var, style="Panel.TLabel",
+                  wraplength=280).pack(anchor="w", pady=(4, 10))
+        ttk.Label(right, text="不需要設定或擷取畫面模板。辨識不確定時會保持待命，不會亂點。",
+                  style="Panel.TLabel", wraplength=280).pack(anchor="w", pady=(4, 0))
+        ttk.Label(right, text="自動選關與戰鬥操作仍在開發驗證中。",
+                  style="Panel.TLabel", wraplength=280).pack(anchor="w", pady=(10, 0))
+        ttk.Button(right, text="自動推關（尚未開放）", state="disabled").pack(fill="x", pady=(12, 5))
+        ttk.Label(right, text="緊急停止：F8。AP 恢復與付費資源操作保留人工確認。",
                   style="Panel.TLabel", wraplength=280).pack(anchor="w", pady=(8, 0))
 
         log_panel = ttk.Frame(self.dashboard_tab, style="Panel.TFrame", padding=8)
@@ -251,8 +221,8 @@ class AutoRouteDesktopApp:
         ttk.Spinbox(settings, from_=1, to=30, textvariable=self.max_runs_var, width=8).grid(row=0, column=1, sticky="w")
         ttk.Label(settings, text="倫敦任務進度目標（1～5）").grid(row=0, column=2, sticky="w", padx=(20, 5))
         ttk.Spinbox(settings, from_=1, to=5, textvariable=self.progress_target_var, width=8).grid(row=0, column=3, sticky="w")
-        ttk.Checkbutton(settings, text="自動略過劇情（需完成模板設定）",
-                        variable=self.skip_story_var).grid(row=1, column=0, columnspan=3, sticky="w", padx=5, pady=8)
+        ttk.Label(settings, text="劇情自動處理：待自動畫面辨識與路線執行整合。",
+                  ).grid(row=1, column=0, columnspan=4, sticky="w", padx=5, pady=8)
 
         custom = ttk.LabelFrame(self.route_tab, text="自訂路線（先儲存規劃，不會直接執行）", padding=10)
         custom.pack(fill="x", pady=10)
@@ -277,8 +247,8 @@ class AutoRouteDesktopApp:
         future = ttk.LabelFrame(self.battle_tab, text="後續策略模組", padding=12)
         future.pack(fill="x", pady=8)
         for line in (
-            "敵方職階與目標辨識：待建立並驗證模板。",
-            "技能冷卻與效果判斷：待建立並驗證模板。",
+            "敵方職階與目標辨識：待 OCR 與戰鬥畫面規則整合。",
+            "技能冷卻與效果判斷：待 OCR 與技能狀態驗證。",
             "寶具時機與指令卡策略：待建立並驗證策略。",
             "遇到未知戰鬥畫面：暫停並交由使用者確認。",
         ):
@@ -492,6 +462,7 @@ class AutoRouteDesktopApp:
             self.status_var.set(f"ADB 已連線：{serial}")
             self.log(f"ADB 連線成功：{serial}")
             self._start_capture_loop()
+            self._start_vision_loop()
             self.start_scrcpy(show_error=False)
         except Exception as exc:
             self.status_var.set("連線失敗")
@@ -571,6 +542,45 @@ class AutoRouteDesktopApp:
                 time.sleep(0.8)
             time.sleep(PREVIEW_INTERVAL_MS / 1000.0)
 
+    def _start_vision_loop(self):
+        if self.vision_thread and self.vision_thread.is_alive():
+            return
+        self.vision_stop.clear()
+        self.vision_thread = threading.Thread(target=self._vision_loop, daemon=True)
+        self.vision_thread.start()
+
+    def _vision_loop(self):
+        # OCR is throttled separately from the live preview to keep MuMu capture responsive.
+        while not self.vision_stop.is_set() and not self.closing:
+            frame = self.get_latest_frame()
+            if frame is None:
+                self.vision_stop.wait(0.25)
+                continue
+            try:
+                detection = self.screen_detector.detect(frame)
+                self.last_detection = detection
+                self.root.after(0, self._apply_detection, detection)
+            except Exception as exc:
+                self.root.after(0, self._apply_detection_error, str(exc))
+                self.vision_stop.wait(1.5)
+                continue
+            self.vision_stop.wait(0.9)
+
+    def _apply_detection(self, detection):
+        if detection.state == "unknown":
+            self.screen_state_var.set("無法判斷目前畫面")
+            self.screen_detail_var.set("沒有足夠的日文／英文介面文字；程式保持待命，不會自動點擊。")
+            return
+        self.screen_state_var.set(f"{detection.label} · {detection.confidence:.0%}")
+        signals = "、".join(detection.signals) if detection.signals else "OCR"
+        elapsed = f"{detection.elapsed:.2f}s" if detection.elapsed else "—"
+        self.screen_detail_var.set(f"辨識依據：{signals}　耗時：{elapsed}")
+
+    def _apply_detection_error(self, error):
+        self.screen_state_var.set("畫面辨識模組啟動失敗")
+        self.screen_detail_var.set("請確認下載的是最新完整 EXE；詳細錯誤已記錄。")
+        self.log(f"畫面辨識錯誤：{error}")
+
     def get_latest_frame(self):
         with self.frame_lock:
             return None if self.last_frame is None else self.last_frame.copy()
@@ -609,97 +619,13 @@ class AutoRouteDesktopApp:
             self.preview.create_text(width // 2, height // 2, text=f"畫面轉換失敗：{exc}",
                                      fill="#f0a0a0")
 
-    def open_template_wizard(self):
-        if not self.bot or not self.bot.device.serial:
-            messagebox.showwarning("尚未連線", "請先連接 MuMu。")
-            return
-        if self.wizard and self.wizard.window.winfo_exists():
-            self.wizard.window.lift()
-            return
-        self.wizard = TemplateWizard(self)
-
-    def refresh_template_status(self):
-        if not hasattr(self, "template_count_var"):
-            return
-        names = {path.stem for path in TEMPLATES.glob("*.png")}
-        required = required_template_names(bool(self.skip_story_var.get()))
-        count = sum(1 for name in required if name in names)
-        self.template_count_var.set(f"模板 {count} / {len(required)}")
-
-    def check_setup(self):
-        if self.chapter_var.get() != "london":
-            messagebox.showinfo("路線尚未開放", "此章節已列入第一部路線目錄；完成對應畫面與流程驗證後才會開放自動執行。")
-            return
-        if not self.bot or not self.bot.device.serial:
-            messagebox.showwarning("尚未連線", "請先連接 MuMu。")
-            return
-        try:
-            target = int(self.progress_target_var.get())
-            runs = int(self.max_runs_var.get())
-            if not (1 <= target <= 5 and 1 <= runs <= 30):
-                raise ValueError
-        except ValueError:
-            messagebox.showwarning("設定錯誤", "進度目標需為 1～5，最大戰鬥次數需為 1～30。")
-            return
-        configure_london_profile(target, runs, bool(self.skip_story_var.get()))
-        names = {path.stem for path in TEMPLATES.glob("*.png")}
-        missing = [name for name in required_template_names(bool(self.skip_story_var.get())) if name not in names]
-        self.refresh_template_status()
-        if missing:
-            messagebox.showwarning("模板尚未完成", "尚缺少模板：\n\n" + "、".join(missing[:10]))
-            return
-        messagebox.showinfo("設定完成", "倫敦第六節必要模板已齊全。第一次執行請全程監看。")
-
     def start_automation(self):
-        if self.chapter_var.get() != "london":
-            messagebox.showinfo("路線尚未開放", "目前只有倫敦第六節範例路線接上既有自動化引擎。")
-            return
-        if not self.bot or not self.bot.device.serial:
-            messagebox.showwarning("尚未連線", "請先連接 MuMu。")
-            return
-        try:
-            target = int(self.progress_target_var.get())
-            max_runs = max(1, min(30, int(self.max_runs_var.get())))
-            if not (1 <= target <= 5):
-                raise ValueError
-            ap_current = self.ap_current_var.get().strip()
-            ap_cost = self.ap_cost_var.get().strip()
-            if ap_current and ap_cost:
-                affordable = estimate_affordable_runs(int(ap_current), int(ap_cost), max_runs)
-                if affordable <= 0:
-                    messagebox.showwarning("AP 不足", "依照手動輸入的 AP 與關卡消耗，無法負擔下一場。")
-                    return
-                max_runs = affordable
-                self.config.ap_current = int(ap_current)
-                self.config.ap_cost = int(ap_cost)
-            elif ap_current or ap_cost:
-                messagebox.showwarning("AP 資料不完整", "請同時輸入目前 AP 與每場 AP 消耗，或兩欄都留空。")
-                return
-        except ValueError:
-            messagebox.showwarning("設定錯誤", "請確認次數、AP 與 AP 消耗都是有效整數。")
-            return
-
-        configure_london_profile(target, max_runs, bool(self.skip_story_var.get()))
-        names = {path.stem for path in TEMPLATES.glob("*.png")}
-        missing = [name for name in required_template_names(bool(self.skip_story_var.get())) if name not in names]
-        self.refresh_template_status()
-        if missing:
-            messagebox.showwarning("尚未完成設定", "請先完成畫面模板設定。缺少：\n\n" + "、".join(missing[:8]))
-            self.open_template_wizard()
-            return
-
-        self.config.max_runs = max_runs
-        self.config.progress_target = target
-        self.config.skip_story = bool(self.skip_story_var.get())
-        self.config.selected_chapter = self.chapter_var.get()
-        save_config(self.config)
-        try:
-            self.bot.start(LONDON_ROUTE_ID, safe_mode=False)
-            self.session_started_at = datetime.now()
-            self.session_runs_observed = 0
-            self.log(f"已開始倫敦第六節測試；本次最多 {max_runs} 場。")
-        except Exception as exc:
-            messagebox.showerror("無法開始", str(exc))
+        messagebox.showinfo(
+            "自動推關尚未開放",
+            "本版已移除 13 項手動畫面模板設定，並改用日文 OCR 自動判斷畫面。"
+            "\\n\\n自動選關、戰鬥操作與結算循環仍在整合及實機驗證中；"
+            "為避免誤觸，本版目前只辨識畫面，不會自行點擊遊戲。",
+        )
 
     def pause_automation(self):
         if self.bot:
@@ -769,6 +695,7 @@ class AutoRouteDesktopApp:
 
     def close(self):
         self.closing = True
+        self.vision_stop.set()
         if self.bot:
             self.bot.stop()
         self.capture_stop.set()
