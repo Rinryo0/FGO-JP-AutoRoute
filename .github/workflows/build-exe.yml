@@ -4,7 +4,7 @@ on:
     branches: [main, master]
     tags: ['v*']
     paths:
-      - 'FGO-JP-AutoRoute-v0.3.0-source.zip'
+      - 'FGO-JP-AutoRoute-v0.3.0-source*.zip'
   workflow_dispatch:
 permissions:
   contents: write
@@ -20,11 +20,11 @@ jobs:
       - name: Extract uploaded source archive
         shell: pwsh
         run: |
-          $archive = "FGO-JP-AutoRoute-v0.3.0-source.zip"
-          if (!(Test-Path $archive)) {
+          $archive = Get-ChildItem -File -Filter "FGO-JP-AutoRoute-v0.3.0-source*.zip" | Select-Object -First 1
+          if ($null -eq $archive) {
             throw "請先將 FGO-JP-AutoRoute-v0.3.0-source.zip 上傳到 Repository 根目錄。"
           }
-          Expand-Archive -Path $archive -DestinationPath source -Force
+          Expand-Archive -Path $archive.FullName -DestinationPath source -Force
           if (!(Test-Path "source/FGO-JP-AutoRoute/app.py")) {
             throw "ZIP 結構不正確：找不到 source/FGO-JP-AutoRoute/app.py"
           }
@@ -57,7 +57,8 @@ jobs:
         shell: pwsh
         run: |
           Copy-Item README.md dist/README.md
-          Copy-Item ../../FGO-JP-AutoRoute-v0.3.0-source.zip dist/FGO-JP-AutoRoute-Source.zip
+          $archive = Get-ChildItem ../../ -File -Filter "FGO-JP-AutoRoute-v0.3.0-source*.zip" | Select-Object -First 1
+          Copy-Item $archive.FullName dist/FGO-JP-AutoRoute-Source.zip
           Compress-Archive -Path dist/FGO-JP-AutoRoute.exe,dist/README.md `
             -DestinationPath dist/FGO-JP-AutoRoute-Windows-x64.zip -Force
       - name: Upload build artifacts
