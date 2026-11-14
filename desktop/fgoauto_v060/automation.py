@@ -363,7 +363,7 @@ class AutoRouteRunner:
         if state == "battle_cards":
             if self.battle_started_at is None:
                 self.battle_started_at = datetime.now()
-            cards = self._battle.plan_cards(frame)
+            cards = self._battle.plan_cards(frame, detection, use_np=self.options.auto_use_np)
             if len(cards) != 3:
                 self.stop("指令卡無法可靠辨識，已停止本場戰鬥以避免誤點。")
                 return []
