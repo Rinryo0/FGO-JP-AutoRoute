@@ -71,6 +71,7 @@ class AutoRouteDesktopApp:
         self.ap_estimate_var = tk.StringVar(value="輸入目前 AP 與關卡消耗以估算")
         self.servant_var = tk.StringVar(value=self.config.preferred_servant)
         self.ce_var = tk.StringVar(value=self.config.preferred_ce)
+        self.auto_use_np_var = tk.BooleanVar(value=self.config.auto_use_np)
         self.farm_item_var = tk.StringVar(value=self.config.farm_item_name)
         self.farm_target_var = tk.StringVar(value=str(self.config.farm_target_quantity))
         self.drop_quantity_var = tk.StringVar(value="1")
@@ -260,21 +261,21 @@ class AutoRouteDesktopApp:
 
     def _build_battle(self):
         ttk.Label(self.battle_tab, text="戰鬥策略", font=("Segoe UI", 14, "bold")).pack(anchor="w")
-        ttk.Label(self.battle_tab, text="目前採用穩定優先。技能、寶具與卡牌價值判斷必須先建立可驗證的畫面辨識資料。",
+        ttk.Label(self.battle_tab, text="穩定優先：依即時畫面辨識攻擊按鈕及指令卡；寶具卡需另外啟用 OCR 確認。",
                   wraplength=900).pack(anchor="w", pady=(5, 12))
         card = ttk.LabelFrame(self.battle_tab, text="目前可執行策略", padding=12)
         card.pack(fill="x", pady=6)
         ttk.Label(card, text="目前版本：自動辨識畫面；自動選關、點擊與戰鬥尚未開放。",
                   wraplength=900).pack(anchor="w")
-        future = ttk.LabelFrame(self.battle_tab, text="後續策略模組", padding=12)
+        future = ttk.LabelFrame(self.battle_tab, text="自動戰鬥選項", padding=12)
         future.pack(fill="x", pady=8)
-        for line in (
-            "敵方職階與目標辨識：待 OCR 與戰鬥畫面規則整合。",
-            "技能冷卻與效果判斷：待 OCR 與技能狀態驗證。",
-            "寶具時機與指令卡策略：待建立並驗證策略。",
-            "遇到未知戰鬥畫面：暫停並交由使用者確認。",
-        ):
-            ttk.Label(future, text="• " + line).pack(anchor="w", pady=3)
+        ttk.Checkbutton(future, text="僅在 OCR 明確辨識到「宝具」卡標籤時優先選擇寶具卡",
+                        variable=self.auto_use_np_var).pack(anchor="w", pady=4)
+        ttk.Button(future, text="儲存戰鬥偏好", command=self.save_battle_preferences).pack(anchor="w", pady=6)
+        ttk.Label(future, text="技能圖示與冷卻狀態尚未有可靠通用辨識器，因此不會自動按技能。",
+                  wraplength=900).pack(anchor="w", pady=3)
+        ttk.Label(future, text="遇到未知戰鬥畫面或指令卡辨識不足時，程式會停止。",
+                  wraplength=900).pack(anchor="w", pady=3)
 
     def _build_support(self):
         ttk.Label(self.support_tab, text="支援從者偏好", font=("Segoe UI", 14, "bold")).pack(anchor="w")
@@ -408,6 +409,13 @@ class AutoRouteDesktopApp:
         self.route_stages_var.set("")
         self._refresh_custom_routes()
         self.log(f"已儲存自訂路線規劃：{route['name']}")
+
+    def save_battle_preferences(self):
+        self.config.auto_use_np = bool(self.auto_use_np_var.get())
+        # Skill automation remains disabled until skill icons/cooldowns are validated.
+        self.config.auto_use_skills = False
+        save_config(self.config)
+        self.log("戰鬥偏好已保存；寶具僅在 OCR 確認到卡片標籤時優先選擇。")
 
     def save_support_preferences(self):
         self.config.preferred_servant = self.servant_var.get().strip()
