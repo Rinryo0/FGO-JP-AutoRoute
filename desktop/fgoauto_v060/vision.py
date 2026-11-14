@@ -30,6 +30,10 @@ class ScreenDetection:
 _LABELS = {
     "unknown": "無法判斷",
     "home": "主畫面",
+    "quest_hub": "任務入口",
+    "main_record_select": "主線選擇",
+    "part_select": "部別選擇",
+    "free_quest_select": "自由任務選擇",
     "chapter_map": "章節地圖",
     "quest_list": "關卡清單",
     "support_select": "支援從者選擇",
@@ -79,6 +83,18 @@ def classify_texts(texts: Iterable[str]) -> ScreenDetection:
         or ("攻撃" in battle_signals and ("ENEMY" in battle_signals or "TURN" in battle_signals))
     ):
         return result("battle_command", battle_signals, 0.91)
+
+    if has("メインストーリー", "MAIN STORY", "メインレコード", "MAIN RECORD"):
+        return result("main_record_select", ("主線入口",), 0.92)
+
+    if has("第1部", "第一部", "PART 1", "PART I"):
+        return result("part_select", ("第一部選項",), 0.91)
+
+    if has("フリークエスト", "FREE QUEST"):
+        return result("free_quest_select", ("自由任務入口",), 0.91)
+
+    if has("クエスト") and has("イベント", "メインクエスト", "フリークエスト", "曜日クエスト"):
+        return result("quest_hub", ("任務入口",), 0.88)
 
     if has("サポート選択", "SUPPORT SELECTION") or (
         has("GUEST SERVANT") and has("FORMATION")
