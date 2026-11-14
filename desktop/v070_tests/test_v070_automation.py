@@ -129,3 +129,80 @@ def test_np_card_priority_requires_opt_in_and_ocr_label():
 
 def test_enemy_class_ocr_analysis():
     assert detect_enemy_classes(["セイバー", "バーサーカー"]) == ("Saber", "Berserker")
+
+
+def test_progress_journal_persists_and_matches_task(tmp_path):
+    from fgoauto_v060.progress import ProgressJournal
+
+    journal = ProgressJournal(tmp_path / "task-progress.json")
+    key = ProgressJournal.task_key("story", "fuyuki", "", "")
+    journal.save({
+        "task_key": key,
+        "mode": "story",
+        "start_chapter_id": "fuyuki",
+        "current_chapter_id": "orleans",
+        "completed_runs": 12,
+        "collected_target": 0,
+        "last_state": "chapter_map",
+        "status": "stopped",
+    })
+    restored = journal.load_for(key)
+    assert restored is not None
+    assert restored["current_chapter_id"] == "orleans"
+    assert restored["completed_runs"] == 12
+    assert journal.load_for("different-task") is None
+
+
+def test_runner_resumes_matching_checkpoint(tmp_path):
+    from fgoauto_v060.progress import ProgressJournal
+
+    path = tmp_path / "task-progress.json"
+    key = ProgressJournal.task_key("story", "fuyuki", "", "")
+    ProgressJournal(path).save({
+        "task_key": key,
+        "mode": "story",
+        "start_chapter_id": "fuyuki",
+        "current_chapter_id": "orleans",
+        "completed_runs": 7,
+        "collected_target": 0,
+        "last_state": "chapter_map",
+        "status": "stopped",
+    })
+    options = AutomationOptions(
+        mode="story", chapter_id="fuyuki", all_chapters=True, progress_path=path
+    )
+    runner = AutoRouteRunner(lambda: None, lambda _x, _y: None, None, options)
+    # start() creates a worker; stop immediately after validating the restored state.
+    runner.start()
+    runner.stop("test stop")
+    runner.thread.join(timeout=2)
+    assert runner.options.chapter_id == "orleans"
+    assert runner.completed_runs == 7
+
+
+def test_progress_journal_completed_task_does_not_resume(tmp_path):
+    from fgoauto_v060.progress import ProgressJournal
+
+    path = tmp_path / "task-progress.json"
+    key = ProgressJournal.task_key("farm", "london", "修練場", "英雄之證")
+    ProgressJournal(path).save({
+        "task_key": key,
+        "mode": "farm",
+        "start_chapter_id": "london",
+        "current_chapter_id": "london",
+        "quest_name": "修練場",
+        "farm_item_name": "英雄之證",
+        "completed_runs": 5,
+        "collected_target": 20,
+        "last_state": "result",
+        "status": "completed",
+    })
+    runner = AutoRouteRunner(
+        lambda: None, lambda _x, _y: None, None,
+        AutomationOptions(mode="farm", chapter_id="london", quest_name="修練場",
+                          farm_item_name="英雄之證", progress_path=path),
+    )
+    runner.start()
+    runner.stop("test stop")
+    runner.thread.join(timeout=2)
+    assert runner.completed_runs == 0

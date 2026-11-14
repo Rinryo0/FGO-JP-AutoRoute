@@ -20,6 +20,7 @@ import cv2
 from .battle import BattlePlanner
 from .catalog import PART_ONE_CHAPTERS
 from .vision import ScreenDetection, TextRegion
+from .progress import ProgressJournal
 
 
 @dataclass
@@ -41,6 +42,7 @@ class AutomationOptions:
     auto_use_np: bool = False
     diagnostics_dir: Path | None = None
     all_chapters: bool = True
+    progress_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -149,6 +151,33 @@ class AutoRouteRunner:
         self._unknown_since: float | None = None
         self._battle = BattlePlanner()
         self.stop_reason = ""
+        self._start_chapter_id = options.chapter_id
+        self.journal = ProgressJournal(options.progress_path) if options.progress_path else None
+
+    def _task_key(self) -> str:
+        return ProgressJournal.task_key(
+            self.options.mode, self._start_chapter_id,
+            self.options.quest_name, self.options.farm_item_name,
+        )
+
+    def _save_checkpoint(self, status: str = "running") -> None:
+        if not self.journal:
+            return
+        try:
+            self.journal.save({
+                "task_key": self._task_key(),
+                "mode": self.options.mode,
+                "start_chapter_id": self._start_chapter_id,
+                "current_chapter_id": self.options.chapter_id,
+                "quest_name": self.options.quest_name,
+                "farm_item_name": self.options.farm_item_name,
+                "completed_runs": self.completed_runs,
+                "collected_target": self.collected_target,
+                "last_state": self._last_state,
+                "status": status,
+            })
+        except OSError as exc:
+            self._emit(f"進度保存失敗：{exc}")
 
     def start(self) -> None:
         if self.running:
@@ -157,9 +186,22 @@ class AutoRouteRunner:
             raise ValueError("任務模式必須是 story 或 farm")
         if self.options.mode == "farm" and not self.options.quest_name.strip():
             raise ValueError("素材刷取必須指定關卡名稱，避免誤刷其他關卡")
+        if self.journal:
+            saved = self.journal.load_for(self._task_key())
+            if saved and saved.get("status") != "completed":
+                saved_chapter = str(saved.get("current_chapter_id") or self.options.chapter_id)
+                if any(ch.chapter_id == saved_chapter for ch in PART_ONE_CHAPTERS):
+                    self.options.chapter_id = saved_chapter
+                self.completed_runs = max(0, int(saved.get("completed_runs", 0) or 0))
+                self.collected_target = max(0, int(saved.get("collected_target", 0) or 0))
+                self._emit(
+                    f"已恢復本機進度：{self.options.chapter_id}，"
+                    f"完成 {self.completed_runs} 場，目標素材 {self.collected_target}。"
+                )
         self.stop_event.clear()
         self.pause_event.set()
         self.started_at = datetime.now()
+        self._save_checkpoint("running")
         self.running = True
         self.thread = threading.Thread(target=self._run, name="FGO-AutoRoute", daemon=True)
         self.thread.start()
@@ -177,6 +219,7 @@ class AutoRouteRunner:
         self.stop_reason = reason
         self.stop_event.set()
         self.pause_event.set()
+        self._save_checkpoint("stopped")
         self._emit(reason)
 
     def _emit(self, message: str) -> None:
@@ -202,6 +245,7 @@ class AutoRouteRunner:
                     self.stop("畫面無法可靠辨識，已停止；請確認遊戲畫面後重新開始。")
                     break
                 self._emit_state(detection)
+                self._save_checkpoint("running")
                 ap = parse_ap(detection.texts)
                 if ap and self.options.ap_cost > 0 and ap[0] < self.options.ap_cost:
                     self.stop(f"AP 不足（{ap[0]} AP），不會自動使用任何蘋果或聖晶石。")
@@ -235,6 +279,8 @@ class AutoRouteRunner:
                     )
                 except Exception as exc:
                     self._emit(f"工作階段統計寫入失敗：{exc}")
+            completed = any(term in self.stop_reason for term in ("完成", "達成", "上限"))
+            self._save_checkpoint("completed" if completed else "stopped")
             self._emit(f"任務結束：完成 {self.completed_runs} 場；素材目標進度 {self.collected_target}。")
 
     def _emit_state(self, detection: ScreenDetection) -> None:
@@ -274,6 +320,7 @@ class AutoRouteRunner:
             except Exception as exc:
                 self._emit(f"戰鬥統計寫入失敗：{exc}")
         self.battle_started_at = None
+        self._save_checkpoint("running")
         self._emit(f"戰鬥結算：第 {self.completed_runs} 場；辨識到目標素材 {quantity}。")
         return True
 
@@ -327,6 +374,7 @@ class AutoRouteRunner:
             next_chapter = PART_ONE_CHAPTERS[current_index + 1]
             self.options.chapter_id = next_chapter.chapter_id
             self.options.chapter_label = next_chapter.japanese_name
+            self._save_checkpoint("running")
             self._emit(f"章節完成，下一目標：{next_chapter.name}")
             return self._tap_text(detection, ("次へ", "NEXT", "進む"))
         if state == "chapter_map":
@@ -334,7 +382,10 @@ class AutoRouteRunner:
             target = find_region(detection, terms)
             if target:
                 return [self._region_tap(target, "選擇目標章節")]
-            return self._tap_text(detection, ("NEXT", "次へ")) if self.options.mode == "story" else []
+            if self.options.mode == "story":
+                self._emit("目前章節地圖未辨識到目標章節名稱；不會盲目點擊 NEXT。")
+                self.stop("章節地圖目標無法辨識，請更新 OCR 辨識資料後重試。")
+            return []
         if state == "quest_list":
             if self.options.mode == "farm":
                 target = find_region(detection, (self.options.quest_name,))

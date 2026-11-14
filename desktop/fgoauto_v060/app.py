@@ -207,6 +207,10 @@ class AutoRouteDesktopApp:
                   style="Panel.TLabel", wraplength=280).pack(anchor="w", pady=(10, 0))
         ttk.Button(right, text="開始自動任務", style="Accent.TButton",
                    command=self.start_automation).pack(fill="x", pady=(12, 5))
+        controls = ttk.Frame(right, style="Panel.TFrame")
+        controls.pack(fill="x", pady=(2, 5))
+        ttk.Button(controls, text="暫停", command=self.pause_automation).pack(side="left", fill="x", expand=True, padx=(0, 3))
+        ttk.Button(controls, text="繼續", command=self.resume_automation).pack(side="left", fill="x", expand=True, padx=(3, 0))
         ttk.Button(right, text="停止任務（F8）", style="Danger.TButton",
                    command=self.stop_automation).pack(fill="x", pady=(2, 5))
         ttk.Label(right, text="不會自動使用聖晶石或蘋果。",
@@ -727,6 +731,7 @@ class AutoRouteDesktopApp:
                 auto_use_np=bool(self.config.auto_use_np),
                 diagnostics_dir=app_data_dir() / "diagnostics",
                 all_chapters=(mode == "story"),
+                progress_path=app_data_dir() / "task-progress.json",
             )
             adb_path = self.adb_path or getattr(self.bot.device, "exe", None)
             self.adb_controller = AdbController(adb_path, self.bot.device.serial)
