@@ -23,6 +23,28 @@ class CardTarget:
 
 _PRIORITY = {"np": 4, "buster": 3, "arts": 2, "quick": 1}
 
+_ENEMY_CLASSES = {
+    "セイバー": "Saber",
+    "アーチャー": "Archer",
+    "ランサー": "Lancer",
+    "ライダー": "Rider",
+    "キャスター": "Caster",
+    "アサシン": "Assassin",
+    "バーサーカー": "Berserker",
+    "ルーラー": "Ruler",
+    "アヴェンジャー": "Avenger",
+    "ムーンキャンサー": "Moon Cancer",
+    "アルターエゴ": "Alter Ego",
+    "フォーリナー": "Foreigner",
+    "プリテンダー": "Pretender",
+    "ビースト": "Beast",
+}
+
+
+def detect_enemy_classes(texts: Iterable[str]) -> tuple[str, ...]:
+    joined = "".join(str(text) for text in texts)
+    return tuple(label for token, label in _ENEMY_CLASSES.items() if token in joined)
+
 
 def detect_command_cards(frame: np.ndarray) -> list[CardTarget]:
     """Find the three best FGO command-card candidates in a 16:9 frame."""
@@ -99,6 +121,11 @@ class BattlePlanner:
             for card in cards
         ]
         return sorted(marked, key=lambda card: (_PRIORITY[card.color], card.confidence), reverse=True)
+
+    @staticmethod
+    def enemy_summary(self, texts: Iterable[str]) -> str:
+        classes = detect_enemy_classes(texts)
+        return "敵方職階：" + "、".join(classes) if classes else "未辨識到敵方職階文字"
 
     @staticmethod
     def explain(cards: Iterable[CardTarget]) -> str:
