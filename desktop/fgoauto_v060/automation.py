@@ -231,7 +231,7 @@ class AutoRouteRunner:
                     self.stats.record_session(
                         f"{self.options.mode}:{self.options.chapter_id}:{self.options.quest_name or 'auto'}",
                         self.started_at, datetime.now(), self.completed_runs,
-                        "completed" if self._should_finish() else "stopped_or_incomplete",
+                        "completed" if (self._should_finish() or any(term in self.stop_reason for term in ("完成", "達成", "上限"))) else "stopped_or_incomplete",
                     )
                 except Exception as exc:
                     self._emit(f"工作階段統計寫入失敗：{exc}")
