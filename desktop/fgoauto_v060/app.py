@@ -322,7 +322,8 @@ class AutoRouteDesktopApp:
         header.pack(fill="x")
         ttk.Label(header, text="戰鬥與素材統計", font=("Segoe UI", 14, "bold")).pack(side="left")
         ttk.Button(header, text="重新整理", command=self.refresh_stats).pack(side="right", padx=4)
-        ttk.Button(header, text="匯出戰鬥 CSV", command=self.export_stats).pack(side="right", padx=4)
+        ttk.Button(header, text="匯出場次 CSV", command=self.export_stats).pack(side="right", padx=4)
+        ttk.Button(header, text="匯出戰鬥 CSV", command=self.export_battle_stats).pack(side="right", padx=4)
         self.stats_summary_var = tk.StringVar(value="")
         ttk.Label(self.stats_tab, textvariable=self.stats_summary_var).pack(anchor="w", pady=10)
         columns = ("route", "start", "runs", "status", "duration")
@@ -472,7 +473,11 @@ class AutoRouteDesktopApp:
         total_duration = sum(int(row.get("duration_seconds", 0)) for row in battles)
         speed = runs_per_hour(len(battles), total_duration)
         efficiency = ap_efficiency(summary["drop_quantity"], summary["ap_spent"])
-        progress = target_progress(summary["drop_quantity"], self.config.farm_target_quantity)
+        target_item_total = sum(
+            int(row["quantity"]) for row in self.stats.recent_drops(limit=100000)
+            if row["item_name"] == self.config.farm_item_name
+        ) if self.config.farm_item_name else 0
+        progress = target_progress(target_item_total, self.config.farm_target_quantity)
         self.stats_summary_var.set(
             f"工作階段：{summary['sessions']}　戰鬥：{summary['battles']}　"
             f"已用 AP：{summary['ap_spent']}　平均：{speed} 場／時　"
@@ -487,6 +492,18 @@ class AutoRouteDesktopApp:
                 values=(row["route_id"], row["started_at"], row["runs_observed"],
                         row["status"], row["duration_seconds"]),
             )
+
+    def export_battle_stats(self):
+        target = filedialog.asksaveasfilename(
+            title="匯出單場戰鬥統計",
+            defaultextension=".csv",
+            filetypes=[("CSV", "*.csv")],
+            initialfile="FGO-JP-AutoRoute-battles.csv",
+        )
+        if not target:
+            return
+        self.stats.export_battles_csv(Path(target))
+        messagebox.showinfo("匯出完成", f"已匯出：{target}")
 
     def export_stats(self):
         target = filedialog.asksaveasfilename(
