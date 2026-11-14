@@ -14,9 +14,14 @@ from tkinter import filedialog, messagebox, ttk
 from PIL import Image, ImageTk
 
 from .catalog import LONDON_ROUTE_ID, PART_ONE_CHAPTERS, executable_chapter_ids, get_chapter
-from .config import AppConfig, load_config, save_config
+from .config import AppConfig, app_data_dir, config_path, load_config, save_config
 from .planner import estimate_affordable_runs, make_custom_route
 from .storage import StatsStore
+from .automation import AutomationOptions, AutoRouteRunner
+from .adb_control import AdbController
+from .backup import export_settings, import_settings
+from .notifications import notify
+from .scheduler import DailySchedule, parse_start_time, should_start
 
 # ADB discovery is retained for MuMu compatibility. Screen recognition is template-free.
 from legacy_main import find_adb
@@ -41,6 +46,8 @@ class AutoRouteDesktopApp:
             self.config.selected_chapter = "london"
         self.stats = StatsStore()
         self.bot = None
+        self.runner = None
+        self.adb_controller = None
         self.adb_path = find_adb()
         self.device_var = tk.StringVar(value=self.config.adb_serial)
         self.status_var = tk.StringVar(value="尚未連線")
@@ -51,6 +58,10 @@ class AutoRouteDesktopApp:
         self.vision_stop = threading.Event()
         self.last_detection = None
         self.chapter_var = tk.StringVar(value=self.config.selected_chapter)
+        self.task_mode_var = tk.StringVar(value="主線推進" if self.config.task_mode == "story" else "素材刷取")
+        self.target_quest_var = tk.StringVar(value=self.config.target_quest_name)
+        self.schedule_enabled_var = tk.BooleanVar(value=self.config.schedule_enabled)
+        self.schedule_time_var = tk.StringVar(value=self.config.schedule_time)
         self.max_runs_var = tk.StringVar(value=str(self.config.max_runs))
         self.progress_target_var = tk.StringVar(value=str(self.config.progress_target))
         self.skip_story_var = tk.BooleanVar(value=self.config.skip_story)
@@ -82,6 +93,7 @@ class AutoRouteDesktopApp:
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.root.bind("<F8>", lambda _event: self.stop_automation())
         self.root.after(500, self._refresh_status)
+        self.root.after(15000, self._check_schedule)
         self.refresh_stats()
 
     def _configure_style(self):
@@ -173,7 +185,14 @@ class AutoRouteDesktopApp:
         right.pack_propagate(False)
         ttk.Label(right, text="任務控制", style="Panel.TLabel",
                   font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(0, 10))
-        ttk.Label(right, text="第一部章節", style="Panel.TLabel").pack(anchor="w")
+        ttk.Label(right, text="任務模式", style="Panel.TLabel").pack(anchor="w")
+        self.task_mode_combo = ttk.Combobox(
+            right, textvariable=self.task_mode_var, state="readonly",
+            values=("主線推進", "素材刷取"), width=22,
+        )
+        self.task_mode_combo.pack(anchor="w", fill="x", pady=(3, 8))
+        ttk.Label(right, text="第一部章節起點請在「章節與路線」分頁設定。",
+                  style="Panel.TLabel", wraplength=280).pack(anchor="w", pady=(0, 8))
         ttk.Label(right, text="自動畫面辨識", style="Panel.TLabel",
                   font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(4, 5))
         ttk.Label(right, textvariable=self.screen_state_var, style="Panel.TLabel",
@@ -182,10 +201,13 @@ class AutoRouteDesktopApp:
                   wraplength=280).pack(anchor="w", pady=(4, 10))
         ttk.Label(right, text="不需要設定或擷取畫面模板。辨識不確定時會保持待命，不會亂點。",
                   style="Panel.TLabel", wraplength=280).pack(anchor="w", pady=(4, 0))
-        ttk.Label(right, text="自動選關與戰鬥操作仍在開發驗證中。",
+        ttk.Label(right, text="主線與素材模式共用自動流程；辨識不到或操作後畫面不變時會停止。",
                   style="Panel.TLabel", wraplength=280).pack(anchor="w", pady=(10, 0))
-        ttk.Button(right, text="自動推關（尚未開放）", state="disabled").pack(fill="x", pady=(12, 5))
-        ttk.Label(right, text="緊急停止：F8。AP 恢復與付費資源操作保留人工確認。",
+        ttk.Button(right, text="開始自動任務", style="Accent.TButton",
+                   command=self.start_automation).pack(fill="x", pady=(12, 5))
+        ttk.Button(right, text="停止任務（F8）", style="Danger.TButton",
+                   command=self.stop_automation).pack(fill="x", pady=(2, 5))
+        ttk.Label(right, text="不會自動使用聖晶石或蘋果。",
                   style="Panel.TLabel", wraplength=280).pack(anchor="w", pady=(8, 0))
 
         log_panel = ttk.Frame(self.dashboard_tab, style="Panel.TFrame", padding=8)
@@ -196,7 +218,7 @@ class AutoRouteDesktopApp:
                                insertbackground="#ffffff", relief="flat",
                                font=("Consolas", 9), wrap="word", state="disabled")
         self.log_box.pack(fill="x", pady=(6, 0))
-        self.log("v0.6.0 OCR 開發版已啟動。連接 MuMu 後會自動辨識畫面；自動點擊尚未開放。")
+        self.log("v0.7.0 自動化開發版已啟動。先連接 MuMu，再選擇主線或素材任務。")
 
     def _build_routes(self):
         ttk.Label(self.route_tab, text="第一部章節目錄", font=("Segoe UI", 14, "bold")).pack(anchor="w")
@@ -283,14 +305,16 @@ class AutoRouteDesktopApp:
 
         farm = ttk.LabelFrame(self.farm_tab, text="素材目標與掉落登記", padding=12)
         farm.pack(fill="x", pady=10)
-        ttk.Label(farm, text="目標素材").grid(row=0, column=0, sticky="w", padx=5, pady=5)
-        ttk.Entry(farm, textvariable=self.farm_item_var, width=26).grid(row=0, column=1, sticky="w")
-        ttk.Label(farm, text="目標數量").grid(row=0, column=2, sticky="w", padx=(18, 5))
-        ttk.Entry(farm, textvariable=self.farm_target_var, width=8).grid(row=0, column=3, sticky="w")
-        ttk.Label(farm, text="本次確認掉落").grid(row=1, column=0, sticky="w", padx=5, pady=8)
-        ttk.Entry(farm, textvariable=self.drop_quantity_var, width=8).grid(row=1, column=1, sticky="w")
-        ttk.Button(farm, text="登記素材", command=self.record_drop).grid(row=1, column=2, padx=8, sticky="w")
-        ttk.Button(farm, text="儲存素材目標", command=self.save_farm_goal).grid(row=1, column=3, padx=8, sticky="w")
+        ttk.Label(farm, text="指定關卡").grid(row=0, column=0, sticky="w", padx=5, pady=5)
+        ttk.Entry(farm, textvariable=self.target_quest_var, width=42).grid(row=0, column=1, columnspan=3, sticky="w")
+        ttk.Label(farm, text="目標素材").grid(row=1, column=0, sticky="w", padx=5, pady=5)
+        ttk.Entry(farm, textvariable=self.farm_item_var, width=26).grid(row=1, column=1, sticky="w")
+        ttk.Label(farm, text="目標數量").grid(row=1, column=2, sticky="w", padx=(18, 5))
+        ttk.Entry(farm, textvariable=self.farm_target_var, width=8).grid(row=1, column=3, sticky="w")
+        ttk.Label(farm, text="本次確認掉落").grid(row=2, column=0, sticky="w", padx=5, pady=8)
+        ttk.Entry(farm, textvariable=self.drop_quantity_var, width=8).grid(row=2, column=1, sticky="w")
+        ttk.Button(farm, text="登記素材", command=self.record_drop).grid(row=2, column=2, padx=8, sticky="w")
+        ttk.Button(farm, text="儲存素材目標", command=self.save_farm_goal).grid(row=2, column=3, padx=8, sticky="w")
 
     def _build_stats(self):
         header = ttk.Frame(self.stats_tab)
@@ -321,6 +345,16 @@ class AutoRouteDesktopApp:
                   wraplength=900).pack(anchor="w", pady=5)
         ttk.Label(self.system_tab, text="程式不會自動使用聖晶石或任何蘋果恢復 AP。遇到未知畫面應停止並人工確認。",
                   wraplength=900).pack(anchor="w", pady=5)
+        schedule = ttk.LabelFrame(self.system_tab, text="每日自動排程", padding=10)
+        schedule.pack(fill="x", pady=10)
+        ttk.Checkbutton(schedule, text="啟用每日排程", variable=self.schedule_enabled_var).pack(side="left", padx=5)
+        ttk.Label(schedule, text="開始時間（HH:MM）").pack(side="left", padx=(12, 5))
+        ttk.Entry(schedule, textvariable=self.schedule_time_var, width=8).pack(side="left")
+        ttk.Button(schedule, text="儲存排程", command=self.save_schedule).pack(side="left", padx=10)
+        backup = ttk.LabelFrame(self.system_tab, text="設定備份", padding=10)
+        backup.pack(fill="x", pady=6)
+        ttk.Button(backup, text="匯出設定", command=self.backup_settings).pack(side="left", padx=5)
+        ttk.Button(backup, text="匯入設定", command=self.restore_settings).pack(side="left", padx=5)
 
     def _selected_chapter(self):
         index = self.chapter_combo.current()
@@ -383,6 +417,7 @@ class AutoRouteDesktopApp:
 
     def save_farm_goal(self):
         self.config.farm_item_name = self.farm_item_var.get().strip()
+        self.config.target_quest_name = self.target_quest_var.get().strip()
         try:
             self.config.farm_target_quantity = max(0, int(self.farm_target_var.get() or "0"))
         except ValueError:
@@ -619,26 +654,151 @@ class AutoRouteDesktopApp:
             self.preview.create_text(width // 2, height // 2, text=f"畫面轉換失敗：{exc}",
                                      fill="#f0a0a0")
 
-    def start_automation(self):
-        messagebox.showinfo(
-            "自動推關尚未開放",
-            "本版已移除 13 項手動畫面模板設定，並改用日文 OCR 自動判斷畫面。"
-            "\n\n自動選關、戰鬥操作與結算循環仍在整合及實機驗證中；"
-            "為避免誤觸，本版目前只辨識畫面，不會自行點擊遊戲。",
-        )
+    def start_automation(self, scheduled=False):
+        if self.runner and self.runner.running:
+            messagebox.showinfo("任務執行中", "目前已有自動任務在執行。")
+            return False
+        if not self.bot or not getattr(self.bot.device, "serial", None):
+            messagebox.showwarning("尚未連接 MuMu", "請先連接 MuMu 12，再開始自動任務。")
+            return False
+        mode = "story" if self.task_mode_var.get() == "主線推進" else "farm"
+        quest_name = self.target_quest_var.get().strip()
+        if mode == "farm" and not quest_name:
+            messagebox.showwarning("缺少關卡名稱", "請到「素材與 AP」分頁輸入要循環刷取的關卡名稱。")
+            return False
+        try:
+            chapter = self._selected_chapter()
+            max_runs = max(1, min(10000, int(self.max_runs_var.get())))
+            progress_target = max(1, int(self.progress_target_var.get()))
+            farm_target = max(0, int(self.farm_target_var.get() or "0"))
+            ap_cost = max(0, int(self.ap_cost_var.get() or self.config.ap_cost or 0))
+            options = AutomationOptions(
+                mode=mode,
+                chapter_id=chapter.chapter_id if chapter else self.config.selected_chapter,
+                chapter_label=chapter.japanese_name if chapter else self.config.selected_chapter,
+                quest_name=quest_name,
+                max_runs=max_runs,
+                progress_target=progress_target,
+                skip_story=bool(self.skip_story_var.get()),
+                preferred_servant=self.servant_var.get().strip(),
+                preferred_ce=self.ce_var.get().strip(),
+                farm_item_name=self.farm_item_var.get().strip(),
+                farm_target_quantity=farm_target,
+                ap_cost=ap_cost,
+                min_confidence=float(self.config.min_ocr_confidence),
+                auto_use_skills=bool(self.config.auto_use_skills),
+                auto_use_np=bool(self.config.auto_use_np),
+                diagnostics_dir=app_data_dir() / "diagnostics",
+                all_chapters=(mode == "story"),
+            )
+            adb_path = self.adb_path or getattr(self.bot.device, "exe", None)
+            self.adb_controller = AdbController(adb_path, self.bot.device.serial)
+            self.config.task_mode = mode
+            self.config.target_quest_name = quest_name
+            self.config.max_runs = max_runs
+            self.config.farm_target_quantity = farm_target
+            save_config(self.config)
+            self.runner = AutoRouteRunner(
+                capture=self.get_latest_frame,
+                tap=self.adb_controller.tap,
+                detector=self.screen_detector,
+                options=options,
+                on_event=self.log,
+                stats=self.stats,
+            )
+            self.runner.start()
+            self.status_var.set("自動任務啟動中")
+            self.log("已啟動全自動流程；未知畫面、AP 不足及操作無回應會安全停止。")
+            return True
+        except Exception as exc:
+            messagebox.showerror("無法啟動自動任務", str(exc))
+            return False
 
     def pause_automation(self):
-        if self.bot:
+        if self.runner and self.runner.running:
+            self.runner.pause()
+        elif self.bot:
             self.bot.pause()
 
     def resume_automation(self):
-        if self.bot:
+        if self.runner and self.runner.running:
+            self.runner.resume()
+        elif self.bot:
             self.bot.resume()
 
     def stop_automation(self):
+        stopped = False
+        if self.runner and self.runner.running:
+            self.runner.stop("使用者按下停止，已安全結束自動任務。")
+            stopped = True
         if self.bot:
-            self.bot.stop()
+            try:
+                self.bot.stop()
+            except Exception:
+                pass
+        if stopped:
             self.log("已送出停止指令。")
+
+
+    def save_schedule(self):
+        try:
+            parse_start_time(self.schedule_time_var.get())
+        except ValueError as exc:
+            messagebox.showwarning("排程格式錯誤", str(exc))
+            return
+        self.config.schedule_enabled = bool(self.schedule_enabled_var.get())
+        self.config.schedule_time = self.schedule_time_var.get().strip()
+        save_config(self.config)
+        self.log("每日排程設定已保存。")
+
+    def _check_schedule(self):
+        if self.closing:
+            return
+        try:
+            from datetime import date
+            last = date.fromisoformat(self.config.schedule_last_date) if self.config.schedule_last_date else None
+            schedule = DailySchedule(
+                enabled=bool(self.config.schedule_enabled),
+                start_time=self.config.schedule_time,
+                weekdays=tuple(self.config.schedule_weekdays),
+            )
+            if should_start(schedule, datetime.now(), last):
+                if self.start_automation(scheduled=True):
+                    self.config.schedule_last_date = date.today().isoformat()
+                    save_config(self.config)
+                    self.log("每日排程已啟動。")
+        except Exception as exc:
+            self.log(f"排程檢查失敗：{exc}")
+        self.root.after(15000, self._check_schedule)
+
+    def backup_settings(self):
+        target = filedialog.asksaveasfilename(
+            title="匯出 FGO-JP-AutoRoute 設定",
+            defaultextension=".json",
+            filetypes=[("JSON", "*.json")],
+            initialfile="FGO-JP-AutoRoute-settings.json",
+        )
+        if not target:
+            return
+        try:
+            export_settings(config_path(), Path(target))
+            messagebox.showinfo("備份完成", f"設定已匯出：{target}")
+        except Exception as exc:
+            messagebox.showerror("備份失敗", str(exc))
+
+    def restore_settings(self):
+        source = filedialog.askopenfilename(
+            title="匯入 FGO-JP-AutoRoute 設定",
+            filetypes=[("JSON", "*.json")],
+        )
+        if not source:
+            return
+        try:
+            import_settings(Path(source), config_path())
+            self.config = load_config()
+            messagebox.showinfo("還原完成", "設定已匯入。請重新啟動程式套用全部設定。")
+        except Exception as exc:
+            messagebox.showerror("還原失敗", str(exc))
 
     def _finish_session_if_needed(self, state: str):
         if self.session_started_at and state == "idle":
@@ -655,7 +815,9 @@ class AutoRouteDesktopApp:
     def _refresh_status(self):
         if self.closing:
             return
-        if self.bot:
+        if self.runner and self.runner.running:
+            self.status_var.set(f"自動任務執行中 · 已完成 {self.runner.completed_runs} 場")
+        elif self.bot:
             try:
                 status = self.bot.status()
                 state = status.get("state", "idle")
@@ -696,6 +858,8 @@ class AutoRouteDesktopApp:
     def close(self):
         self.closing = True
         self.vision_stop.set()
+        if self.runner and self.runner.running:
+            self.runner.stop("程式關閉，已停止自動任務。")
         if self.bot:
             self.bot.stop()
         self.capture_stop.set()
