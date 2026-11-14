@@ -36,7 +36,7 @@ PREVIEW_INTERVAL_MS = 220
 class AutoRouteDesktopApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title(f"{APP_NAME} v0.6.0 — Windows 原生控制中心")
+        self.root.title(f"{APP_NAME} v0.7.0 — Windows 原生控制中心")
         self.root.geometry("1180x780")
         self.root.minsize(1020, 690)
         self.root.configure(bg="#0b1220")
@@ -240,9 +240,8 @@ class AutoRouteDesktopApp:
         settings = ttk.LabelFrame(self.route_tab, text="路線執行上限", padding=10)
         settings.pack(fill="x", pady=8)
         ttk.Label(settings, text="最多戰鬥次數").grid(row=0, column=0, sticky="w", padx=5, pady=5)
-        ttk.Spinbox(settings, from_=1, to=30, textvariable=self.max_runs_var, width=8).grid(row=0, column=1, sticky="w")
-        ttk.Label(settings, text="倫敦任務進度目標（1～5）").grid(row=0, column=2, sticky="w", padx=(20, 5))
-        ttk.Spinbox(settings, from_=1, to=5, textvariable=self.progress_target_var, width=8).grid(row=0, column=3, sticky="w")
+        ttk.Spinbox(settings, from_=1, to=10000, textvariable=self.max_runs_var, width=8).grid(row=0, column=1, sticky="w")
+        ttk.Checkbutton(settings, text="自動跳過劇情", variable=self.skip_story_var).grid(row=0, column=2, columnspan=2, sticky="w", padx=(20, 5))
         ttk.Label(settings, text="劇情自動處理：待自動畫面辨識與路線執行整合。",
                   ).grid(row=1, column=0, columnspan=4, sticky="w", padx=5, pady=8)
 
@@ -459,8 +458,8 @@ class AutoRouteDesktopApp:
             return
         summary = self.stats.summary()
         self.stats_summary_var.set(
-            f"工作階段：{summary['sessions']}　觀察到的戰鬥次數：{summary['runs']}　"
-            f"素材紀錄：{summary['drop_records']} 筆／共 {summary['drop_quantity']} 個"
+            f"工作階段：{summary['sessions']}　戰鬥：{summary['battles']}　"
+            f"已用 AP：{summary['ap_spent']}　素材紀錄：{summary['drop_records']} 筆／共 {summary['drop_quantity']} 個"
         )
         for item in self.stats_tree.get_children():
             self.stats_tree.delete(item)
@@ -763,7 +762,11 @@ class AutoRouteDesktopApp:
                 weekdays=tuple(self.config.schedule_weekdays),
             )
             if should_start(schedule, datetime.now(), last):
-                if self.start_automation(scheduled=True):
+                if not self.bot or not getattr(self.bot.device, "serial", None):
+                    self.config.schedule_last_date = date.today().isoformat()
+                    save_config(self.config)
+                    self.log("排程時間已到，但 MuMu 尚未連線；今日排程不會自動啟動。")
+                elif self.start_automation(scheduled=True):
                     self.config.schedule_last_date = date.today().isoformat()
                     save_config(self.config)
                     self.log("每日排程已啟動。")
