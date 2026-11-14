@@ -74,7 +74,7 @@ def classify_texts(texts: Iterable[str]) -> ScreenDetection:
 
     battle_signals = tuple(term for term in ("BATTLE", "ENEMY", "TURN", "ATTACK", "攻撃") if has(term))
     if (
-        ("BATTLE" in battle_signals and "ENEMY" in battle_signals and "TURN" in battle_signals)
+        ("BATTLE" in battle_signals and "TURN" in battle_signals)
         or ("ATTACK" in battle_signals and ("BATTLE" in battle_signals or "ENEMY" in battle_signals))
         or ("攻撃" in battle_signals and ("ENEMY" in battle_signals or "TURN" in battle_signals))
     ):
@@ -85,10 +85,12 @@ def classify_texts(texts: Iterable[str]) -> ScreenDetection:
     ):
         return result("support_select", ("支援選択画面",), 0.93)
 
-    if has("PARTY") and has("クエスト開始", "QUEST START", "出撃"):
+    if (has("PARTY") and has("クエスト開始", "QUEST START", "出撃")) or (
+        has("クエスト開始", "QUEST START") and has("編成", "パーティ")
+    ):
         return result("party_confirm", ("隊伍確認", "開始按鈕"), 0.91)
 
-    if has("SKIP", "スキップ") and has("LOG", "AUTO", "オート", "ログ"):
+    if has("SKIP", "スキップ") and has("LOG", "AUTO", "オート", "ログ", "TAP"):
         return result("story", ("SKIP／劇情操作列",), 0.90)
 
     if has("AP") and (
