@@ -122,7 +122,6 @@ class BattlePlanner:
         ]
         return sorted(marked, key=lambda card: (_PRIORITY[card.color], card.confidence), reverse=True)
 
-    @staticmethod
     def enemy_summary(self, texts: Iterable[str]) -> str:
         classes = detect_enemy_classes(texts)
         return "敵方職階：" + "、".join(classes) if classes else "未辨識到敵方職階文字"
