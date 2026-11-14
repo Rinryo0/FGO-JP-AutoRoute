@@ -90,7 +90,7 @@ class BattlePlanner:
         ]
         if not np_regions:
             return cards
-        target = min(np_regions, key=lambda region: region.confidence)
+        target = max(np_regions, key=lambda region: region.confidence)
         center_x = (target.x1 + target.x2) // 2
         nearest = min(cards, key=lambda card: abs(card.x - center_x))
         marked = [
