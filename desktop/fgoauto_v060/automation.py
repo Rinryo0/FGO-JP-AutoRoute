@@ -243,6 +243,8 @@ class AutoRouteRunner:
             self._last_state = detection.state
             self._state_since = time.monotonic()
             self._last_waiting_state = ""
+            if detection.state == "battle_command":
+                self._emit(self._battle.enemy_summary(detection.texts))
 
     def _handle_result(self, detection: ScreenDetection) -> bool:
         if detection.state != "result":
