@@ -1,7 +1,7 @@
 name: Build Windows Desktop EXE
 on:
   push:
-    branches: [main, master, v0.6.0-dev]
+    branches: [main, master, v0.6.0-dev, v0.7.0-dev]
     paths:
       - 'desktop/**'
       - '.github/workflows/build-exe.yml'
@@ -60,7 +60,7 @@ jobs:
         run: |
           python -m compileall -q desktop
           $env:PYTHONPATH = "desktop"
-          python -m pytest -q desktop/legacy_tests desktop/v060_tests
+          python -m pytest -q desktop/legacy_tests desktop/v060_tests desktop/v070_tests
       - name: Build standalone Windows x64 EXE
         shell: pwsh
         run: |
