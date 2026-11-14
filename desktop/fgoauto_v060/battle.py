@@ -21,7 +21,7 @@ class CardTarget:
     confidence: float
 
 
-_PRIORITY = {"buster": 3, "arts": 2, "quick": 1}
+_PRIORITY = {"np": 4, "buster": 3, "arts": 2, "quick": 1}
 
 
 def detect_command_cards(frame: np.ndarray) -> list[CardTarget]:
@@ -78,8 +78,27 @@ def detect_command_cards(frame: np.ndarray) -> list[CardTarget]:
 class BattlePlanner:
     """Stable-first card selector; never guesses skill or NP button positions."""
 
-    def plan_cards(self, frame: np.ndarray) -> list[CardTarget]:
-        return detect_command_cards(frame)
+    def plan_cards(self, frame: np.ndarray, detection=None, use_np: bool = False) -> list[CardTarget]:
+        cards = detect_command_cards(frame)
+        if not use_np or len(cards) != 3 or detection is None:
+            return cards
+        height = frame.shape[0]
+        np_regions = [
+            region for region in getattr(detection, "regions", ())
+            if ("宝具" in region.text or "NOBLE PHANTASM" in region.text.upper())
+            and region.y1 >= height * 0.42
+        ]
+        if not np_regions:
+            return cards
+        target = min(np_regions, key=lambda region: region.confidence)
+        center_x = (target.x1 + target.x2) // 2
+        nearest = min(cards, key=lambda card: abs(card.x - center_x))
+        marked = [
+            CardTarget(card.x, card.y, "np" if card == nearest else card.color,
+                       min(0.99, card.confidence + 0.02) if card == nearest else card.confidence)
+            for card in cards
+        ]
+        return sorted(marked, key=lambda card: (_PRIORITY[card.color], card.confidence), reverse=True)
 
     @staticmethod
     def explain(cards: Iterable[CardTarget]) -> str:
