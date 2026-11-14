@@ -11,7 +11,7 @@ from fgoauto_v060.automation import (
     parse_ap,
     parse_item_quantity,
 )
-from fgoauto_v060.battle import BattlePlanner, detect_command_cards
+from fgoauto_v060.battle import BattlePlanner, detect_command_cards, detect_enemy_classes
 from fgoauto_v060.backup import export_settings, import_settings
 from fgoauto_v060.scheduler import DailySchedule, next_start, should_start
 from fgoauto_v060.storage import StatsStore
@@ -125,3 +125,7 @@ def test_np_card_priority_requires_opt_in_and_ocr_label():
     cards = BattlePlanner().plan_cards(frame, detection, use_np=True)
     assert len(cards) == 3
     assert cards[0].color == "np"
+
+
+def test_enemy_class_ocr_analysis():
+    assert detect_enemy_classes(["セイバー", "バーサーカー"]) == ("Saber", "Berserker")
