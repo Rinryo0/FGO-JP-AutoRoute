@@ -77,19 +77,18 @@ def find_region(detection: ScreenDetection, terms: tuple[str, ...] | list[str]) 
 
 
 def parse_ap(texts: tuple[str, ...]) -> tuple[int, int] | None:
-    for text in texts:
-        upper = str(text).upper().replace("／", "/")
-        patterns = (
-            r"\bAP\s*(\d{1,3})\s*/\s*(\d{1,3})\b",
-            r"\b(\d{1,3})\s*/\s*(\d{1,3})\s*AP\b",
-            r"AP\s*(\d{1,3})\b",
-        )
-        for index, pattern in enumerate(patterns):
-            match = re.search(pattern, upper)
-            if match:
-                if index == 2:
-                    return int(match.group(1)), 0
-                return int(match.group(1)), int(match.group(2))
+    joined = " ".join(str(text) for text in texts).upper().replace("／", "/")
+    patterns = (
+        r"\bAP\s*(\d{1,3})\s*/\s*(\d{1,3})\b",
+        r"\b(\d{1,3})\s*/\s*(\d{1,3})\s*AP\b",
+        r"AP\s*(\d{1,3})\b",
+    )
+    for index, pattern in enumerate(patterns):
+        match = re.search(pattern, joined)
+        if match:
+            if index == 2:
+                return int(match.group(1)), 0
+            return int(match.group(1)), int(match.group(2))
     return None
 
 
@@ -282,7 +281,8 @@ class AutoRouteRunner:
             self.stop_event.set()
             self._emit(self.stop_reason)
             return True
-        if self.options.mode == "story" and self.completed_runs >= max(1, self.options.progress_target):
+        if (self.options.mode == "story" and not self.options.all_chapters
+                and self.completed_runs >= max(1, self.options.progress_target)):
             self.stop_reason = "已達設定的主線進度場次上限"
             self.stop_event.set()
             self._emit(self.stop_reason)
