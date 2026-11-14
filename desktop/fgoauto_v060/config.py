@@ -19,6 +19,7 @@ def app_data_dir() -> Path:
 
 
 def config_path() -> Path:
+    # Keep the v0.6 filename so existing user settings migrate automatically.
     return app_data_dir() / "v060-settings.json"
 
 
@@ -39,6 +40,19 @@ class AppConfig:
     farm_item_name: str = ""
     farm_target_quantity: int = 0
     custom_routes: list[dict[str, Any]] = field(default_factory=list)
+    task_mode: str = "story"
+    target_quest_name: str = ""
+    min_ocr_confidence: float = 0.88
+    auto_use_skills: bool = False
+    auto_use_np: bool = False
+    allow_apples: bool = False
+    allow_quartz: bool = False
+    schedule_enabled: bool = False
+    schedule_time: str = "08:00"
+    schedule_weekdays: list[int] = field(default_factory=lambda: [0, 1, 2, 3, 4, 5, 6])
+    schedule_last_date: str = ""
+    notify_on_finish: bool = True
+    ap_regen_seconds: int = 300
 
 
 def load_config(path: Path | None = None) -> AppConfig:
