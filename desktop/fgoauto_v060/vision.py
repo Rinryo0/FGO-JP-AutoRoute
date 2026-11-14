@@ -140,9 +140,15 @@ class FgoScreenDetector:
 
     @staticmethod
     def _regions(output: Any) -> tuple[TextRegion, ...]:
-        boxes = getattr(output, "boxes", None) or ()
-        texts = getattr(output, "txts", None) or ()
-        scores = getattr(output, "scores", None) or ()
+        boxes = getattr(output, "boxes", None)
+        texts = getattr(output, "txts", None)
+        scores = getattr(output, "scores", None)
+        if boxes is None:
+            boxes = ()
+        if texts is None:
+            texts = ()
+        if scores is None:
+            scores = ()
         regions: list[TextRegion] = []
         for index, text in enumerate(texts):
             if index >= len(boxes):
@@ -163,7 +169,10 @@ class FgoScreenDetector:
         if frame is None:
             return ScreenDetection("unknown", _LABELS["unknown"], 0.0, (), ())
         output = self._get_engine()(frame)
-        texts = tuple(str(item) for item in (getattr(output, "txts", ()) or ()))
+        raw_texts = getattr(output, "txts", None)
+        if raw_texts is None:
+            raw_texts = ()
+        texts = tuple(str(item) for item in raw_texts)
         detection = classify_texts(texts)
         return ScreenDetection(
             detection.state,
