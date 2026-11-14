@@ -299,6 +299,19 @@ class AutoRouteRunner:
         state = detection.state
         if state == "home":
             return self._tap_text(detection, ("クエスト", "QUEST"))
+        if state == "quest_hub":
+            if self.options.mode == "farm":
+                return self._tap_text(detection, ("フリークエスト", "FREE QUEST", "曜日クエスト"))
+            return self._tap_text(detection, ("メインストーリー", "メインクエスト", "MAIN STORY"))
+        if state == "main_record_select":
+            return self._tap_text(detection, ("メインストーリー", "MAIN STORY", "第1部"))
+        if state == "part_select":
+            return self._tap_text(detection, ("第1部", "第一部", "PART 1", "PART I"))
+        if state == "free_quest_select":
+            target = find_region(detection, (self.options.quest_name,)) if self.options.quest_name else None
+            return [self._region_tap(target, "選擇指定自由任務")] if target else self._tap_text(
+                detection, ("フリークエスト", "FREE QUEST")
+            )
         if state == "chapter_clear":
             if self.options.mode != "story" or not self.options.all_chapters:
                 return self._tap_text(detection, ("次へ", "NEXT", "進む"))
