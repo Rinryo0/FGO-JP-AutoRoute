@@ -144,6 +144,7 @@ class AutoRouteRunner:
         self._action_state_at = 0.0
         self._last_waiting_state = ""
         self._last_state = ""
+        self._state_since = time.monotonic()
         self._result_recorded = False
         self._unknown_since: float | None = None
         self._battle = BattlePlanner()
@@ -217,6 +218,9 @@ class AutoRouteRunner:
                 elif detection.state not in {"battle_command", "battle_cards"} and self._last_waiting_state != detection.state:
                     self._last_waiting_state = detection.state
                     self._emit(f"目前畫面「{detection.label}」沒有找到符合條件的操作目標，保持等待。")
+                if time.monotonic() - self._state_since > 25.0:
+                    self.stop(f"畫面「{detection.label}」超過 25 秒沒有可確認的下一步，已停止。")
+                    break
                 self.stop_event.wait(0.8)
         except Exception as exc:
             self.stop(f"自動流程發生錯誤，已安全停止：{exc}")
@@ -237,6 +241,8 @@ class AutoRouteRunner:
         if detection.state != self._last_state:
             self._emit(f"畫面：{detection.label}（{detection.confidence:.0%}）")
             self._last_state = detection.state
+            self._state_since = time.monotonic()
+            self._last_waiting_state = ""
 
     def _handle_result(self, detection: ScreenDetection) -> bool:
         if detection.state != "result":
@@ -346,7 +352,7 @@ class AutoRouteRunner:
                 self.battle_started_at = datetime.now()
             cards = self._battle.plan_cards(frame)
             if len(cards) != 3:
-                self._emit(self._battle.explain(cards))
+                self.stop("指令卡無法可靠辨識，已停止本場戰鬥以避免誤點。")
                 return []
             self._emit(self._battle.explain(cards))
             return [PlannedTap(card.x, card.y, f"選擇 {card.color.upper()} 指令卡") for card in cards]
