@@ -18,6 +18,7 @@ from typing import Callable, Any
 import cv2
 
 from .battle import BattlePlanner
+from .catalog import PART_ONE_CHAPTERS
 from .vision import ScreenDetection, TextRegion
 
 
@@ -39,6 +40,7 @@ class AutomationOptions:
     auto_use_skills: bool = False
     auto_use_np: bool = False
     diagnostics_dir: Path | None = None
+    all_chapters: bool = True
 
 
 @dataclass(frozen=True)
@@ -139,6 +141,9 @@ class AutoRouteRunner:
         self.battle_started_at: datetime | None = None
         self._last_action_key = ""
         self._last_action_at = 0.0
+        self._action_state = ""
+        self._action_state_at = 0.0
+        self._last_waiting_state = ""
         self._last_state = ""
         self._result_recorded = False
         self._unknown_since: float | None = None
@@ -210,7 +215,8 @@ class AutoRouteRunner:
                 action = self._plan_action(detection, frame)
                 if action:
                     self._perform(action)
-                elif detection.state not in {"battle_command", "battle_cards"}:
+                elif detection.state not in {"battle_command", "battle_cards"} and self._last_waiting_state != detection.state:
+                    self._last_waiting_state = detection.state
                     self._emit(f"目前畫面「{detection.label}」沒有找到符合條件的操作目標，保持等待。")
                 self.stop_event.wait(0.8)
         except Exception as exc:
@@ -287,6 +293,21 @@ class AutoRouteRunner:
         state = detection.state
         if state == "home":
             return self._tap_text(detection, ("クエスト", "QUEST"))
+        if state == "chapter_clear":
+            if self.options.mode != "story" or not self.options.all_chapters:
+                return self._tap_text(detection, ("次へ", "NEXT", "進む"))
+            current_index = next(
+                (i for i, chapter in enumerate(PART_ONE_CHAPTERS)
+                 if chapter.chapter_id == self.options.chapter_id), -1
+            )
+            if current_index < 0 or current_index + 1 >= len(PART_ONE_CHAPTERS):
+                self.stop("第一部九大章節已到最後一章，主線任務完成。")
+                return []
+            next_chapter = PART_ONE_CHAPTERS[current_index + 1]
+            self.options.chapter_id = next_chapter.chapter_id
+            self.options.chapter_label = next_chapter.japanese_name
+            self._emit(f"章節完成，下一目標：{next_chapter.name}")
+            return self._tap_text(detection, ("次へ", "NEXT", "進む"))
         if state == "chapter_map":
             terms = _CHAPTER_TERMS.get(self.options.chapter_id, (self.options.chapter_label,))
             target = find_region(detection, terms)
@@ -321,6 +342,8 @@ class AutoRouteRunner:
                 self.battle_started_at = datetime.now()
             return self._tap_text(detection, ("ATTACK", "攻撃"))
         if state == "battle_cards":
+            if self.battle_started_at is None:
+                self.battle_started_at = datetime.now()
             cards = self._battle.plan_cards(frame)
             if len(cards) != 3:
                 self._emit(self._battle.explain(cards))
@@ -342,18 +365,23 @@ class AutoRouteRunner:
         return PlannedTap(int((region.x1 + region.x2) / 2), int((region.y1 + region.y2) / 2), reason)
 
     def _perform(self, actions: list[PlannedTap]) -> None:
+        if not actions or self.stop_event.is_set():
+            return
+        now = time.monotonic()
+        if self._action_state == self._last_state:
+            if now - self._action_state_at > 15.0:
+                self.stop(f"畫面「{self._last_state}」在操作後沒有變化，已停止避免重複點擊。")
+            return
         for action in actions:
             if self.stop_event.is_set():
                 return
-            key = f"{self._last_state}:{action.x}:{action.y}:{action.reason}"
-            now = time.monotonic()
-            if key == self._last_action_key and now - self._last_action_at < 2.0:
-                continue
             self.tap(action.x, action.y)
-            self._last_action_key = key
+            self._last_action_key = f"{self._last_state}:{action.x}:{action.y}:{action.reason}"
             self._last_action_at = time.monotonic()
             self._emit(f"{action.reason}（{action.x}, {action.y}）")
             self.stop_event.wait(0.25)
+        self._action_state = self._last_state
+        self._action_state_at = time.monotonic()
 
     def _save_diagnostic(self, frame: Any, detection: ScreenDetection) -> None:
         directory = self.options.diagnostics_dir
