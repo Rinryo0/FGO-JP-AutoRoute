@@ -15,7 +15,7 @@ from fgoauto_v060.battle import BattlePlanner, detect_command_cards
 from fgoauto_v060.backup import export_settings, import_settings
 from fgoauto_v060.scheduler import DailySchedule, next_start, should_start
 from fgoauto_v060.storage import StatsStore
-from fgoauto_v060.vision import ScreenDetection, TextRegion
+from fgoauto_v060.vision import ScreenDetection, TextRegion, classify_texts
 
 
 def test_ap_parser_joins_separate_ocr_regions():
@@ -107,3 +107,21 @@ def test_settings_backup_round_trip(tmp_path):
     export_settings(source, backup)
     import_settings(backup, restored)
     assert '"task_mode": "farm"' in restored.read_text(encoding="utf-8")
+
+
+def test_ocr_classifier_detects_main_record_part_and_free_quest():
+    assert classify_texts(["メインストーリー"]).state == "main_record_select"
+    assert classify_texts(["第1部"]).state == "part_select"
+    assert classify_texts(["フリークエスト"]).state == "free_quest_select"
+
+
+def test_np_card_priority_requires_opt_in_and_ocr_label():
+    frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+    cv2.rectangle(frame, (100, 450), (230, 690), (0, 0, 230), -1)
+    cv2.rectangle(frame, (350, 450), (480, 690), (230, 0, 0), -1)
+    cv2.rectangle(frame, (600, 450), (730, 690), (0, 230, 0), -1)
+    region = TextRegion("宝具", 0.99, 360, 500, 420, 530)
+    detection = ScreenDetection("battle_cards", "指令卡選擇", 0.95, (), ("宝具",), regions=(region,))
+    cards = BattlePlanner().plan_cards(frame, detection, use_np=True)
+    assert len(cards) == 3
+    assert cards[0].color == "np"
