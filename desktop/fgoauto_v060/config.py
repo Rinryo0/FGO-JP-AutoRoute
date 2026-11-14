@@ -28,9 +28,9 @@ class AppConfig:
     adb_serial: str = "auto"
     resolution_width: int = 1280
     resolution_height: int = 720
-    selected_chapter: str = "london"
+    selected_chapter: str = "fuyuki"
     route_id: str = "jp-london-4th-section-06"
-    max_runs: int = 7
+    max_runs: int = 1000
     progress_target: int = 5
     skip_story: bool = True
     ap_current: int | None = None
