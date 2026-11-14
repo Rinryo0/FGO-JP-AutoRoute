@@ -15,7 +15,8 @@ from PIL import Image, ImageTk
 
 from .catalog import LONDON_ROUTE_ID, PART_ONE_CHAPTERS, executable_chapter_ids, get_chapter
 from .config import AppConfig, app_data_dir, config_path, load_config, save_config
-from .planner import estimate_affordable_runs, make_custom_route
+from .planner import estimate_affordable_runs, estimate_ap_recovery, make_custom_route
+from .analytics import ap_efficiency, runs_per_hour, target_progress
 from .storage import StatsStore
 from .automation import AutomationOptions, AutoRouteRunner
 from .adb_control import AdbController
@@ -437,7 +438,9 @@ class AutoRouteDesktopApp:
         self.config.ap_current = current
         self.config.ap_cost = cost
         save_config(self.config)
-        self.ap_estimate_var.set(f"目前 AP 可負擔 {runs} 場（已套用最多 {max_runs} 場上限）")
+        remaining = estimate_ap_recovery(current, cost, self.config.ap_regen_seconds) if current < cost else 0
+        recovery_text = f"；距離下一場約 {remaining // 60} 分鐘" if remaining else ""
+        self.ap_estimate_var.set(f"目前 AP 可負擔 {runs} 場（上限 {max_runs} 場）{recovery_text}")
 
     def record_drop(self):
         item = self.farm_item_var.get().strip()
@@ -457,9 +460,16 @@ class AutoRouteDesktopApp:
         if not hasattr(self, "stats_tree"):
             return
         summary = self.stats.summary()
+        battles = self.stats.recent_battles(limit=100000)
+        total_duration = sum(int(row.get("duration_seconds", 0)) for row in battles)
+        speed = runs_per_hour(len(battles), total_duration)
+        efficiency = ap_efficiency(summary["drop_quantity"], summary["ap_spent"])
+        progress = target_progress(summary["drop_quantity"], self.config.farm_target_quantity)
         self.stats_summary_var.set(
             f"工作階段：{summary['sessions']}　戰鬥：{summary['battles']}　"
-            f"已用 AP：{summary['ap_spent']}　素材紀錄：{summary['drop_records']} 筆／共 {summary['drop_quantity']} 個"
+            f"已用 AP：{summary['ap_spent']}　平均：{speed} 場／時　"
+            f"素材：{summary['drop_quantity']} 個　每 AP：{efficiency}"
+            + (f"　目標進度：{progress:.0%}" if self.config.farm_target_quantity > 0 else "")
         )
         for item in self.stats_tree.get_children():
             self.stats_tree.delete(item)
