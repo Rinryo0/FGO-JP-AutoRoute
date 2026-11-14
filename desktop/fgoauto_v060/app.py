@@ -675,6 +675,9 @@ class AutoRouteDesktopApp:
         if mode == "farm" and not quest_name:
             messagebox.showwarning("缺少關卡名稱", "請到「素材與 AP」分頁輸入要循環刷取的關卡名稱。")
             return False
+        if mode == "farm" and not (self.ap_cost_var.get().strip() or self.config.ap_cost):
+            messagebox.showwarning("缺少 AP 消耗", "素材循環前請輸入每場關卡 AP 消耗，避免 AP 不足時繼續操作。")
+            return False
         try:
             chapter = self._selected_chapter()
             max_runs = max(1, min(10000, int(self.max_runs_var.get())))
